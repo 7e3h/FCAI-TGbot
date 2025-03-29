@@ -146,43 +146,53 @@ async def show_year_materials(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     base_dir = BOOKS_DIR if is_book else SUMMARIES_DIR
     year_dir = os.path.join(base_dir, f"year_{year}")
+    
+    # Store the current directory and type in context
+    context.user_data['current_dir'] = year_dir
+    context.user_data['is_book'] = is_book
+    context.user_data['year'] = year
+    context.user_data['dir_stack'] = [year_dir]  # Initialize directory stack
+    
     if os.path.exists(year_dir):
-        # Get list of files in the year directory
-        files = [f for f in os.listdir(year_dir) if os.path.isfile(os.path.join(year_dir, f))]
+        # Get list of items in the year directory
+        items = os.listdir(year_dir)
         
-        if files:
-            # Initialize file data for this user
-            if user_id not in file_data:
-                file_data[user_id] = {}
-            
+        if items:
             keyboard = []
-            for idx, filename in enumerate(files, 1):
-                # Store file info with a short ID
-                file_id = str(idx)
-                file_data[user_id][file_id] = {
-                    'filename': filename,
-                    'year': year,
-                    'is_book': is_book
-                }
-                
-                # Remove file extension for display
-                display_name = os.path.splitext(filename)[0]
-                keyboard.append([InlineKeyboardButton(
-                    display_name,
-                    callback_data=f'file_{file_id}'
-                )])
+            for idx, item in enumerate(items, 1):
+                item_path = os.path.join(year_dir, item)
+                if os.path.isdir(item_path):
+                    keyboard.append([InlineKeyboardButton(
+                        f"📁 {item}",
+                        callback_data=f"d{idx}"  # d for directory
+                    )])
+                else:
+                    # Remove file extension for display
+                    display_name = os.path.splitext(item)[0]
+                    keyboard.append([InlineKeyboardButton(
+                        f"📄 {display_name}",
+                        callback_data=f"f{idx}"  # f for file
+                    )])
+            
+            # Store paths in context
+            context.user_data['paths'] = {f"d{idx}": os.path.join(year_dir, item) 
+                                        for idx, item in enumerate(items, 1) 
+                                        if os.path.isdir(os.path.join(year_dir, item))}
+            context.user_data['paths'].update({f"f{idx}": os.path.join(year_dir, item) 
+                                             for idx, item in enumerate(items, 1) 
+                                             if os.path.isfile(os.path.join(year_dir, item))})
             
             # Add back button
-            keyboard.append([InlineKeyboardButton("رجوع", callback_data='back_to_years')])
+            keyboard.append([InlineKeyboardButton("رجوع", callback_data='back_to_menu')])
             
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.message.edit_text("اختر الملف الذي تريد تحميله:", reply_markup=reply_markup)
+            await query.message.edit_text("اختر الملف أو المجلد الذي تريد تحميله:", reply_markup=reply_markup)
         else:
-            keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_years')]]
+            keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_menu')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.message.edit_text("لا توجد ملفات متاحة لهذه الفرقة حالياً.", reply_markup=reply_markup)
+            await query.message.edit_text("لا توجد ملفات أو مجلدات متاحة لهذه الفرقة حالياً.", reply_markup=reply_markup)
     else:
-        keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_years')]]
+        keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_menu')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.message.edit_text("عذراً، محتوى هذه الفرقة غير متوفر حالياً.", reply_markup=reply_markup)
 
@@ -291,35 +301,123 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await show_playlist_links(update, context, year)
     
-    elif query.data.startswith('file_'):
-        file_id = query.data.split('_')[1]
-        
-        if user_id in file_data and file_id in file_data[user_id]:
-            file_info = file_data[user_id][file_id]
-            base_dir = BOOKS_DIR if file_info.get('is_book', True) else SUMMARIES_DIR
-            file_path = os.path.join(base_dir, f"year_{file_info['year']}", file_info['filename'])
-            
-            try:
-                if os.path.exists(file_path):
-                    await query.message.reply_document(
-                        document=open(file_path, 'rb'),
-                        filename=file_info['filename']
-                    )
-                else:
-                    await query.message.edit_text(
-                        "عذراً، الملف غير متوفر حالياً.",
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("رجوع", callback_data='back_to_years')]])
-                    )
-            except Exception as e:
-                logger.error(f"Error sending file: {str(e)}")
-                await query.message.edit_text(
-                    "حدث خطأ أثناء إرسال الملف. يرجى المحاولة مرة أخرى.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("رجوع", callback_data='back_to_years')]])
-                )
+    elif query.data.startswith('d'):  # Directory
+        path = context.user_data.get('paths', {}).get(query.data)
+        if path and os.path.exists(path):
+            items = os.listdir(path)
+            if items:
+                keyboard = []
+                for idx, item in enumerate(items, 1):
+                    item_path = os.path.join(path, item)
+                    if os.path.isdir(item_path):
+                        keyboard.append([InlineKeyboardButton(
+                            f"📁 {item}",
+                            callback_data=f"d{idx}"
+                        )])
+                    else:
+                        # Remove file extension for display
+                        display_name = os.path.splitext(item)[0]
+                        keyboard.append([InlineKeyboardButton(
+                            f"📄 {display_name}",
+                            callback_data=f"f{idx}"
+                        )])
+                
+                # Store paths in context
+                context.user_data['paths'] = {f"d{idx}": os.path.join(path, item) 
+                                            for idx, item in enumerate(items, 1) 
+                                            if os.path.isdir(os.path.join(path, item))}
+                context.user_data['paths'].update({f"f{idx}": os.path.join(path, item) 
+                                                 for idx, item in enumerate(items, 1) 
+                                                 if os.path.isfile(os.path.join(path, item))})
+                
+                # Update directory stack
+                dir_stack = context.user_data.get('dir_stack', [])
+                dir_stack.append(path)
+                context.user_data['dir_stack'] = dir_stack
+                context.user_data['current_dir'] = path
+                
+                # Add back button
+                keyboard.append([InlineKeyboardButton("رجوع", callback_data='back_to_parent')])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.message.edit_text(f"اختر الملف أو المجلد من {os.path.basename(path)}:", reply_markup=reply_markup)
+            else:
+                keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_parent')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.message.edit_text("لا توجد ملفات أو مجلدات في هذا المجلد حالياً.", reply_markup=reply_markup)
         else:
+            keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_parent')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.edit_text("عذراً، هذا المجلد غير متوفر حالياً.", reply_markup=reply_markup)
+    
+    elif query.data == 'back_to_parent':
+        dir_stack = context.user_data.get('dir_stack', [])
+        if len(dir_stack) > 1:
+            # Remove current directory from stack
+            dir_stack.pop()
+            # Get parent directory
+            parent_dir = dir_stack[-1]
+            context.user_data['dir_stack'] = dir_stack
+            context.user_data['current_dir'] = parent_dir
+            
+            # Show contents of parent directory
+            items = os.listdir(parent_dir)
+            if items:
+                keyboard = []
+                for idx, item in enumerate(items, 1):
+                    item_path = os.path.join(parent_dir, item)
+                    if os.path.isdir(item_path):
+                        keyboard.append([InlineKeyboardButton(
+                            f"📁 {item}",
+                            callback_data=f"d{idx}"
+                        )])
+                    else:
+                        # Remove file extension for display
+                        display_name = os.path.splitext(item)[0]
+                        keyboard.append([InlineKeyboardButton(
+                            f"📄 {display_name}",
+                            callback_data=f"f{idx}"
+                        )])
+                
+                # Store paths in context
+                context.user_data['paths'] = {f"d{idx}": os.path.join(parent_dir, item) 
+                                            for idx, item in enumerate(items, 1) 
+                                            if os.path.isdir(os.path.join(parent_dir, item))}
+                context.user_data['paths'].update({f"f{idx}": os.path.join(parent_dir, item) 
+                                                 for idx, item in enumerate(items, 1) 
+                                                 if os.path.isfile(os.path.join(parent_dir, item))})
+                
+                # Add back button
+                if len(dir_stack) == 1:  # If we're back at the year directory
+                    keyboard.append([InlineKeyboardButton("رجوع", callback_data='back_to_menu')])
+                else:
+                    keyboard.append([InlineKeyboardButton("رجوع", callback_data='back_to_parent')])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.message.edit_text("اختر الملف أو المجلد الذي تريد تحميله:", reply_markup=reply_markup)
+            else:
+                keyboard = [[InlineKeyboardButton("رجوع", callback_data='back_to_menu')]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.message.edit_text("لا توجد ملفات أو مجلدات متاحة حالياً.", reply_markup=reply_markup)
+    
+    elif query.data.startswith('f'):  # File
+        path = context.user_data.get('paths', {}).get(query.data)
+        try:
+            if path and os.path.exists(path):
+                await query.message.reply_document(
+                    document=open(path, 'rb'),
+                    filename=os.path.basename(path)
+                )
+            else:
+                await query.message.edit_text(
+                    "عذراً، الملف غير متوفر حالياً.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("رجوع", callback_data='back_to_menu')]])
+                )
+        except Exception as e:
+            logger.error(f"Error sending file: {str(e)}")
             await query.message.edit_text(
-                "عذراً، انتهت صلاحية الطلب. يرجى المحاولة مرة أخرى.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("رجوع", callback_data='back_to_years')]])
+                "حدث خطأ أثناء إرسال الملف. يرجى المحاولة مرة أخرى.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("رجوع", callback_data='back_to_menu')]])
             )
 
 async def handle_student_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE):
