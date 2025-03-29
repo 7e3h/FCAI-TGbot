@@ -575,7 +575,7 @@ def main():
     # Load playlist links at startup
     load_playlist_links()
     
-    application = Application.builder().token('7578113791:AAHMIehOLXZ-LQiOiLEGNmljYVs0Ywktbxs').persistence(PicklePersistence(filepath='bot_persistence')).build()
+    application = Application.builder().token('').persistence(PicklePersistence(filepath='bot_persistence')).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
